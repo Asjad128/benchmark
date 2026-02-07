@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FastAPI Benchmark Tester</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 2rem;
+      max-width: 1200px;
+      margin: 0 auto;
+      background: #f8fafc;
+    }
+    h1 {
+      font-size: 2.5rem;
+      margin-bottom: 1rem;
+      color: #1e293b;
+    }
+    .controls {
+      background: white;
+      padding: 2rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+      margin-bottom: 2rem;
+    }
+    .url-input {
+      display: block;
+      width: 100%;
+      padding: 0.75rem;
+      border: 2px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 1rem;
+      margin-bottom: 1rem;
+      transition: border-color 0.2s;
+    }
+    .url-input:focus {
+      outline: none;
+      border-color: #3b82f6;
+    }
+    .buttons {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    button {
+      padding: 0.75rem 1.5rem;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-light { background: #10b981; color: white; }
+    .btn-heavy { background: #ef4444; color: white; }
+    .btn-extreme { background: #8b5cf6; color: white; }
+    button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .loading {
+      background: #f8fafc;
+      padding: 1rem;
+      border-radius: 8px;
+      margin: 1rem 0;
+      border-left: 4px solid #3b82f6;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    .stat-card {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 12px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+      text-align: center;
+    }
+    .stat-value {
+      font-size: 2rem;
+      font-weight: bold;
+      margin-bottom: 0.25rem;
+    }
+    .success { color: #10b981; }
+    .error { color: #ef4444; }
+    .duration { color: #f59e0b; }
+    .throughput { color: #3b82f6; }
+    .results {
+      background: white;
+      padding: 2rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+    }
+    th, td {
+      padding: 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    th {
+      background: #f8fafc;
+      font-weight: 600;
+    }
+    .duration-col { min-width: 120px; }
+  </style>
+</head>
+<body>
+  <h1>FastAPI + HTML/JS Benchmark</h1>
+  
+  <div class="controls">
+    <label style="display: block; margin-bottom: 0.5rem; font-weight: bold; color: #374151;">
+      FastAPI Backend URL:
+    </label>
+    <input type="url" id="backendUrl" class="url-input" 
+           value="http://localhost:8000" 
+           placeholder="https://your-render-app.onrender.com">
+    
+    <div class="buttons">
+      <button class="btn-light" onclick="runBenchmark(5, 1000000)">Light Load (5 reqs)</button>
+      <button class="btn-heavy" onclick="runBenchmark(20, 5000000)">Heavy Load (20 reqs)</button>
+      <button class="btn-extreme" onclick="runBenchmark(50, 10000000)">Extreme Load (50 reqs)</button>
+    </div>
+    
+    <div id="loading" class="loading" style="display: none;">
+      Running benchmark... This will load your FastAPI server!
+    </div>
+  </div>
+
+  <div id="stats" class="stats-grid" style="display: none;">
+    <div class="stat-card">
+      <div class="stat-value" id="requests">0</div>
+      <div>Total Requests</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value success" id="success">0</div>
+      <div>Success</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value error" id="errors">0</div>
+      <div>Errors</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value duration" id="avgDuration">0ms</div>
+      <div>Avg Duration</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value throughput" id="totalThroughput">0</div>
+      <div>Total Throughput</div>
+    </div>
+  </div>
+
+  <div id="resultsSection" class="results" style="display: none;">
+    <h2 style="margin-top: 0; color: #1e293b;">Individual Results</h2>
+    <table id="resultsTable">
+      <thead>
+        <tr>
+          <th>Duration</th>
+          <th>Iterations</th>
+          <th>Result</th>
+          <th>Throughput</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    interface BenchmarkResult {
+      status: string;
+      iterations: number;
+      result: number;
+      duration_ms: number;
+      throughput: number;
+    }
+
+    async function runBenchmark(concurrency: number = 10, iterations: number = 5000000) {
+      const backendUrl = (document.getElementById('backendUrl') as HTMLInputElement).value;
+      const loadingEl = document.getElementById('loading')!;
+      const statsEl = document.getElementById('stats')!;
+      const resultsSection = document.getElementById('resultsSection')!;
+      
+      // Show loading
+      loadingEl.style.display = 'block';
+      statsEl.style.display = 'none';
+      resultsSection.style.display = 'none';
+      
+      // Disable buttons
+      document.querySelectorAll('button').forEach(btn => {
+        (btn as HTMLButtonElement).disabled = true;
+      });
+
+      try {
+        const promises: Promise<BenchmarkResult | { error: true }>[] = [];
+        
+        for (let i = 0; i < concurrency; i++) {
+          promises.push(
+            fetch(`${backendUrl}/benchmark?iterations=${iterations}`, {
+              method: 'GET',
+              headers: { 'Accept': 'application/json' }
+            })
+            .then(res => {
+              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+              return res.json() as Promise<BenchmarkResult>;
+            })
+            .catch(() => ({ error: true }))
+          );
+        }
+
+        const results = await Promise.allSettled(promises);
+        const successfulResults: BenchmarkResult[] = [];
+        
+        results.forEach((result) => {
+          if (result.status === 'fulfilled' && !('error' in result.value)) {
+            successfulResults.push(result.value);
+          }
+        });
+
+        // Calculate stats
+        const successCount = successfulResults.length;
+        const durations = successfulResults.map(r => r.duration_ms);
+        const avgDuration = durations.length 
+          ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
+          : 0;
+        const totalThroughput = successfulResults.reduce((sum, r) => sum + r.throughput, 0);
+
+        // Update stats
+        document.getElementById('requests')!.textContent = concurrency.toString();
+        document.getElementById('success')!.textContent = successCount.toString();
+        document.getElementById('errors')!.textContent = (concurrency - successCount).toString();
+        document.getElementById('avgDuration')!.textContent = `${avgDuration}ms`;
+        document.getElementById('totalThroughput')!.textContent = Math.round(totalThroughput).toString();
+        
+        statsEl.style.display = 'grid';
+
+        // Update results table
+        const tbody = document.querySelector('#resultsTable tbody')!;
+        tbody.innerHTML = '';
+        
+        successfulResults.forEach(result => {
+          const row = tbody.insertRow();
+          row.innerHTML = `
+            <td class="duration-col">${result.duration_ms.toFixed(0)}ms</td>
+            <td>${result.iterations.toLocaleString()}</td>
+            <td>${Math.round(result.result).toLocaleString()}</td>
+            <td>${result.throughput.toLocaleString()}</td>
+          `;
+        });
+        
+        resultsSection.style.display = 'block';
+
+      } catch (error) {
+        console.error('Benchmark failed:', error);
+      } finally {
+        // Hide loading and re-enable buttons
+        loadingEl.style.display = 'none';
+        document.querySelectorAll('button').forEach(btn => {
+          (btn as HTMLButtonElement).disabled = false;
+        });
+      }
+    }
+  </script>
+</body>
+</html>
